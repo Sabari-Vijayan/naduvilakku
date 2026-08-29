@@ -1,0 +1,107 @@
+select esp32 dev module in board
+select tools->port-> /dev/tty/USB0
+
+tick button -> compile button.
+
+Absolutely. Here's the **current final pin configuration** based on the setup we've been using and the working Arduino code.
+
+## ESP32 Pin Configuration
+
+| Component            | Pin / Signal     |  ESP32 GPIO | Purpose                 |
+| -------------------- | ---------------- | ----------: | ----------------------- |
+| **LDR**              | AO (Analog Out)  | **GPIO 34** | Reads light intensity   |
+| **LDR**              | DO (Digital Out) | **GPIO 27** | Digital light threshold |
+| **Sound Sensor**     | AO (Analog Out)  | **GPIO 35** | Reads sound intensity   |
+| **Sound Sensor**     | DO (Digital Out) | **GPIO 26** | Detects sound threshold |
+| **PIR Sensor**       | OUT              | **GPIO 33** | Detects motion          |
+| **WS281B LED Strip** | DIN              | **GPIO 25** | Sends LED data          |
+
+### Power / Ground
+
+```text
+LDR
+├── VCC → 3.3V
+├── GND → GND
+├── AO  → GPIO 34
+└── DO  → GPIO 27
+
+
+Sound Sensor
+├── VCC → 3.3V
+├── GND → GND
+├── AO  → GPIO 35
+└── DO  → GPIO 26
+
+
+PIR
+├── VCC → 5V
+├── GND → GND
+└── OUT → GPIO 33
+
+
+WS281B — 100 LEDs
+├── DIN → GPIO 25
+├── GND → External PSU GND
+└── 5V  → External 5V PSU
+```
+
+### ⚡ Critical LED power connection
+
+The **ESP32 and LED power supply share GND**:
+
+```text
+                 ┌── WS281B GND
+                 │
+External PSU GND ┼── ESP32 GND
+                 │
+                 └── common ground
+```
+
+The LED strip's power **does not come from the ESP32**.
+
+```text
+External 5V PSU
+      │
+      ├── +5V ─────────→ WS281B 5V
+      │
+      └── GND ─────────→ WS281B GND
+                            │
+ESP32 GND ──────────────────┘
+```
+
+### Complete architecture
+
+```text
+                       ESP32
+                         │
+       ┌─────────────────┼─────────────────┐
+       │                 │                 │
+       ▼                 ▼                 ▼
+      LDR             SOUND              PIR
+   GPIO 34/27       GPIO 35/26         GPIO 33
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         │
+                    Sensor Data
+                         │
+                         ▼
+                    USB Serial
+                         │
+                         ▼
+                      Laptop
+                         │
+                       Gemma
+                     (Ollama)
+                         │
+                         ▼
+                    AI Decision
+                         
+ESP32 GPIO 25 ─────────→ WS281B DIN
+                              │
+                       100 LED Strip
+                              │
+                       External 5V PSU
+```
+
+**Current GPIO allocation: `25, 26, 27, 33, 34, 35`** — nice and clean, with the two analog sensors on the ESP32 ADC-capable pins 34 and 35.
+
