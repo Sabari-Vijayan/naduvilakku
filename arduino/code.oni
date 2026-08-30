@@ -1,0 +1,625 @@
+#include <FastLED.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+
+// ============================================
+// PIN CONFIGURATION
+// ============================================
+
+// ---------- LDR ----------
+#define LDR_AO 34
+#define LDR_DO 27
+
+// ---------- SOUND SENSOR ----------
+#define SOUND_AO 35
+#define SOUND_DO 26
+
+// ---------- PIR ----------
+#define PIR_PIN 33
+
+// ---------- WS2812B ----------
+#define LED_PIN 25
+#define NUM_LEDS 100
+
+// ---------- OLED ----------
+#define OLED_SDA 21
+#define OLED_SCL 22
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+#define OLED_ADDRESS 0x3C
+
+
+// ============================================
+// OBJECTS
+// ============================================
+
+CRGB leds[NUM_LEDS];
+
+Adafruit_SSD1306 display(
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  &Wire,
+  -1
+);
+
+
+// ============================================
+// PARTY SETTINGS
+// ============================================
+
+#define NUM_READINGS 10
+#define READING_INTERVAL 1000
+
+int partyLevel = 1;
+
+String gemmaMessage = "Waiting for AI...";
+
+
+// ============================================
+// SETUP
+// ============================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  // ----------------------------------------
+  // ADC
+  // ----------------------------------------
+
+  analogReadResolution(12);
+
+
+  // ----------------------------------------
+  // Sensors
+  // ----------------------------------------
+
+  pinMode(LDR_DO, INPUT);
+  pinMode(SOUND_DO, INPUT);
+  pinMode(PIR_PIN, INPUT);
+
+
+  // ----------------------------------------
+  // LED strip
+  // ----------------------------------------
+
+  FastLED.addLeds<WS2812B, LED_PIN, GRB>(
+    leds,
+    NUM_LEDS
+  );
+
+  FastLED.setBrightness(100);
+
+  FastLED.clear();
+  FastLED.show();
+
+
+  // ----------------------------------------
+  // OLED
+  // ----------------------------------------
+
+  Wire.begin(
+    OLED_SDA,
+    OLED_SCL
+  );
+
+  if (!display.begin(
+        SSD1306_SWITCHCAPVCC,
+        OLED_ADDRESS
+      )) {
+
+    Serial.println("OLED FAILED!");
+
+  } else {
+
+    Serial.println("OLED connected!");
+
+    display.clearDisplay();
+
+    display.setTextColor(SSD1306_WHITE);
+
+    display.setTextSize(2);
+
+    display.setCursor(0, 0);
+
+    display.println("PARTY");
+
+    display.println("METER");
+
+    display.setTextSize(1);
+
+    display.println();
+    display.println("AI SYSTEM ONLINE");
+
+    display.display();
+
+    delay(2000);
+  }
+
+
+  // ----------------------------------------
+  // Random seed
+  // ----------------------------------------
+
+  randomSeed(
+    analogRead(LDR_AO)
+  );
+
+
+  // ----------------------------------------
+  // Startup
+  // ----------------------------------------
+
+  Serial.println();
+  Serial.println("======================================");
+  Serial.println("       PARTY METER ONLINE");
+  Serial.println("======================================");
+  Serial.println("LDR + SOUND + PIR");
+  Serial.println("WS2812 + OLED");
+  Serial.println();
+}
+
+
+// ============================================
+// MAIN LOOP
+// ============================================
+
+void loop() {
+
+  // ========================================
+  // COLLECT 10 SENSOR READINGS
+  // ========================================
+
+  Serial.println("WINDOW_START");
+
+  showCollectingScreen();
+
+
+  for (
+    int i = 0;
+    i < NUM_READINGS;
+    i++
+  ) {
+
+    // ----------------------------------------
+    // Read sensors
+    // ----------------------------------------
+
+    int ldrAnalog =
+      analogRead(LDR_AO);
+
+    int ldrDigital =
+      digitalRead(LDR_DO);
+
+    int soundAnalog =
+      analogRead(SOUND_AO);
+
+    int soundDigital =
+      digitalRead(SOUND_DO);
+
+    int pir =
+      digitalRead(PIR_PIN);
+
+
+    // ----------------------------------------
+    // Send structured data
+    // ----------------------------------------
+
+    Serial.print("DATA,");
+
+    Serial.print(i + 1);
+
+    Serial.print(",");
+
+    Serial.print(ldrAnalog);
+
+    Serial.print(",");
+
+    Serial.print(ldrDigital);
+
+    Serial.print(",");
+
+    Serial.print(soundAnalog);
+
+    Serial.print(",");
+
+    Serial.print(soundDigital);
+
+    Serial.print(",");
+
+    Serial.println(pir);
+
+
+    // ----------------------------------------
+    // Keep displaying current level
+    // ----------------------------------------
+
+    updateLEDs();
+
+    delay(READING_INTERVAL);
+  }
+
+
+  // ========================================
+  // WINDOW COMPLETE
+  // ========================================
+
+  Serial.println("WINDOW_END");
+
+  Serial.println("WAITING_FOR_AI");
+
+
+  showWaitingScreen();
+
+
+  // ========================================
+  // WAIT FOR GEMMA RESPONSE
+  // ========================================
+
+  unsigned long waitStart =
+    millis();
+
+
+  while (
+    millis() - waitStart < 30000
+  ) {
+
+    if (Serial.available()) {
+
+      String command =
+        Serial.readStringUntil('\n');
+
+      command.trim();
+
+
+      // ------------------------------------
+      // LEVEL
+      // ------------------------------------
+
+      if (
+        command.startsWith("LEVEL:")
+      ) {
+
+        int newLevel =
+          command.substring(6).toInt();
+
+
+        if (
+          newLevel >= 1 &&
+          newLevel <= 5
+        ) {
+
+          partyLevel =
+            newLevel;
+
+          Serial.print("AI_LEVEL:");
+          Serial.println(
+            partyLevel
+          );
+
+          updateDisplay();
+
+          updateLEDs();
+        }
+      }
+
+
+      // ------------------------------------
+      // GEMMA MESSAGE
+      // ------------------------------------
+
+      else if (
+        command.startsWith("MSG:")
+      ) {
+
+        gemmaMessage =
+          command.substring(4);
+
+        Serial.print(
+          "AI_MESSAGE:"
+        );
+
+        Serial.println(
+          gemmaMessage
+        );
+
+        updateDisplay();
+      }
+    }
+
+
+    updateLEDs();
+
+    delay(20);
+  }
+}
+
+
+// ============================================
+// OLED — COLLECTING
+// ============================================
+
+void showCollectingScreen() {
+
+  display.clearDisplay();
+
+  display.setTextColor(
+    SSD1306_WHITE
+  );
+
+  display.setTextSize(2);
+
+  display.setCursor(0, 0);
+
+  display.println("SCANNING");
+
+  display.setTextSize(1);
+
+  display.println();
+
+  display.println(
+    "Reading the party..."
+  );
+
+  display.println();
+
+  display.println(
+    "LDR + SOUND + PIR"
+  );
+
+  display.display();
+}
+
+
+// ============================================
+// OLED — WAITING
+// ============================================
+
+void showWaitingScreen() {
+
+  display.clearDisplay();
+
+  display.setTextColor(
+    SSD1306_WHITE
+  );
+
+  display.setTextSize(2);
+
+  display.setCursor(0, 0);
+
+  display.println("GEMMA");
+
+  display.println("THINKING");
+
+  display.setTextSize(1);
+
+  display.println();
+
+  display.println(
+    "Analyzing 10 seconds..."
+  );
+
+  display.display();
+}
+
+
+// ============================================
+// OLED — AI RESULT
+// ============================================
+
+void updateDisplay() {
+
+  display.clearDisplay();
+
+  display.setTextColor(
+    SSD1306_WHITE
+  );
+
+
+  // ----------------------------------------
+  // LEVEL
+  // ----------------------------------------
+
+  display.setTextSize(1);
+
+  display.setCursor(0, 0);
+
+  display.println(
+    "PARTY METER"
+  );
+
+
+  display.setTextSize(3);
+
+  display.setCursor(0, 12);
+
+  display.print(
+    "L"
+  );
+
+  display.print(
+    partyLevel
+  );
+
+
+  // ----------------------------------------
+  // Message
+  // ----------------------------------------
+
+  display.setTextSize(1);
+
+  display.setCursor(45, 18);
+
+  display.println(
+    "GEMMA"
+  );
+
+  display.setCursor(45, 30);
+
+  display.println(
+    gemmaMessage
+  );
+
+
+  display.display();
+}
+
+
+// ============================================
+// LED CONTROLLER
+// ============================================
+
+void updateLEDs() {
+
+  static uint8_t hue = 0;
+
+  hue += 2;
+
+
+  // ========================================
+  // LEVEL 1 — CALM
+  // ========================================
+
+  if (partyLevel == 1) {
+
+    for (
+      int i = 0;
+      i < NUM_LEDS;
+      i++
+    ) {
+
+      uint8_t brightness =
+        beatsin8(
+          5,
+          20,
+          60,
+          0,
+          i * 2
+        );
+
+      leds[i] = CRGB(
+        brightness,
+        brightness * 0.45,
+        brightness * 0.08
+      );
+    }
+  }
+
+
+  // ========================================
+  // LEVEL 2 — CHILL
+  // ========================================
+
+  else if (partyLevel == 2) {
+
+    for (
+      int i = 0;
+      i < NUM_LEDS;
+      i++
+    ) {
+
+      uint8_t brightness =
+        beatsin8(
+          8,
+          40,
+          100,
+          0,
+          i * 3
+        );
+
+      leds[i] = CHSV(
+        150,
+        180,
+        brightness
+      );
+    }
+  }
+
+
+  // ========================================
+  // LEVEL 3 — LIVELY
+  // ========================================
+
+  else if (partyLevel == 3) {
+
+    for (
+      int i = 0;
+      i < NUM_LEDS;
+      i++
+    ) {
+
+      uint8_t brightness =
+        beatsin8(
+          12,
+          60,
+          170,
+          0,
+          i * 5
+        );
+
+      leds[i] = CHSV(
+        hue + i * 3,
+        220,
+        brightness
+      );
+    }
+  }
+
+
+  // ========================================
+  // LEVEL 4 — PARTY
+  // ========================================
+
+  else if (partyLevel == 4) {
+
+    for (
+      int i = 0;
+      i < NUM_LEDS;
+      i++
+    ) {
+
+      uint8_t brightness =
+        beatsin8(
+          20,
+          100,
+          255,
+          0,
+          i * 8
+        );
+
+      leds[i] = CHSV(
+        hue + i * 8,
+        255,
+        brightness
+      );
+    }
+  }
+
+
+  // ========================================
+  // LEVEL 5 — ABSOLUTE CHAOS
+  // ========================================
+
+  else if (partyLevel == 5) {
+
+    for (
+      int i = 0;
+      i < NUM_LEDS;
+      i++
+    ) {
+
+      leds[i] = CHSV(
+        hue + random8(100),
+        255,
+        random8(150, 255)
+      );
+    }
+  }
+
+
+  FastLED.show();
+}

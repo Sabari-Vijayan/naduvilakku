@@ -15,7 +15,7 @@
 // ---------- PIR ----------
 #define PIR_PIN 33
 
-// ---------- WS281B ----------
+// ---------- WS2812B ----------
 #define LED_PIN 25
 #define NUM_LEDS 100
 
@@ -23,26 +23,24 @@ CRGB leds[NUM_LEDS];
 
 
 // ============================================
-// LDR SETTINGS
+// SETTINGS
 // ============================================
 
-// Your LDR behaves inversely:
-// DARK  → higher ADC value
-// BRIGHT → lower ADC value
+#define NUM_READINGS 10
+#define READING_INTERVAL 1000
+
+// Your LDR:
+// DARK  -> higher ADC
+// BRIGHT -> lower ADC
 
 #define DARK_THRESHOLD 900
 
 
 // ============================================
-// PIR SETTINGS
+// PARTY LEVEL
 // ============================================
 
-// Keep people detected for a few seconds after
-// the PIR stops detecting movement.
-
-#define PIR_TIMEOUT 5000
-
-unsigned long lastMotionTime = 0;
+int partyLevel = 1;
 
 
 // ============================================
@@ -53,31 +51,30 @@ void setup() {
 
   Serial.begin(115200);
 
-  // ADC
   analogReadResolution(12);
 
-  // Digital sensor inputs
   pinMode(LDR_DO, INPUT);
   pinMode(SOUND_DO, INPUT);
   pinMode(PIR_PIN, INPUT);
 
-  // WS281B
+  // WS2812B
   FastLED.addLeds<WS2812B, LED_PIN, GRB>(
     leds,
     NUM_LEDS
   );
 
-  FastLED.setBrightness(80);
+  FastLED.setBrightness(100);
 
   FastLED.clear();
   FastLED.show();
 
+  randomSeed(analogRead(LDR_AO));
 
   Serial.println();
   Serial.println("======================================");
-  Serial.println("   SENSOR + WS281B SYSTEM ONLINE");
+  Serial.println("       PARTY METER ONLINE");
   Serial.println("======================================");
-  Serial.println("LDR + SOUND + PIR + 100 LEDS");
+  Serial.println("Collecting 10-second sensor windows...");
   Serial.println();
 }
 
@@ -89,224 +86,251 @@ void setup() {
 void loop() {
 
   // ========================================
-  // READ SENSORS
+  // COLLECT 10 READINGS
   // ========================================
 
-  int ldrAnalog = analogRead(LDR_AO);
-  int ldrDigital = digitalRead(LDR_DO);
+  Serial.println("WINDOW_START");
 
-  int soundAnalog = analogRead(SOUND_AO);
-  int soundDigital = digitalRead(SOUND_DO);
+  for (int i = 0; i < NUM_READINGS; i++) {
 
-  int pir = digitalRead(PIR_PIN);
+    int ldrAnalog = analogRead(LDR_AO);
+    int ldrDigital = digitalRead(LDR_DO);
 
+    int soundAnalog = analogRead(SOUND_AO);
+    int soundDigital = digitalRead(SOUND_DO);
 
-  // ========================================
-  // PIR MEMORY
-  // ========================================
-
-  if (pir == HIGH) {
-    lastMotionTime = millis();
-  }
-
-  bool personPresent =
-    (millis() - lastMotionTime < PIR_TIMEOUT);
+    int pir = digitalRead(PIR_PIN);
 
 
-  // ========================================
-  // DETERMINE LIGHT CONDITION
-  // ========================================
+    // ----------------------------------------
+    // Send structured reading
+    // ----------------------------------------
 
-  bool isDark = ldrAnalog > DARK_THRESHOLD;
+    Serial.print("DATA,");
 
+    Serial.print(i + 1);
 
-  // ========================================
-  // DETERMINE LIGHT MODE
-  // ========================================
-
-  if (personPresent && soundDigital == HIGH) {
-
-    // 🎉 PEOPLE + SOUND
-    danceMode(soundAnalog);
-
-  }
-
-  else if (isDark) {
-
-    // 🌙 DARK
-    lampMode();
-
-  }
-
-  else {
-
-    // ☀️ BRIGHT
-    freshnessMode();
-
-  }
-
-
-  // ========================================
-  // SERIAL MONITOR
-  // ========================================
-
-  static unsigned long lastPrint = 0;
-
-  if (millis() - lastPrint >= 1000) {
-
-    lastPrint = millis();
-
-    Serial.print("LDR:");
+    Serial.print(",");
     Serial.print(ldrAnalog);
 
-    Serial.print(" | LDR_DO:");
+    Serial.print(",");
     Serial.print(ldrDigital);
 
-    Serial.print(" | SOUND:");
+    Serial.print(",");
     Serial.print(soundAnalog);
 
-    Serial.print(" | SOUND_DO:");
+    Serial.print(",");
     Serial.print(soundDigital);
 
-    Serial.print(" | PIR:");
-    Serial.print(pir);
+    Serial.print(",");
+    Serial.println(pir);
 
-    Serial.print(" | MODE:");
 
-    if (personPresent && soundDigital == HIGH) {
-      Serial.println("DANCE");
+    // ----------------------------------------
+    // LED continues showing current level
+    // ----------------------------------------
+
+    updateLEDs();
+
+
+    delay(READING_INTERVAL);
+  }
+
+
+  // ========================================
+  // TELL PYTHON WINDOW IS COMPLETE
+  // ========================================
+
+  Serial.println("WINDOW_END");
+
+  Serial.println("WAITING_FOR_AI");
+
+
+  // ========================================
+  // WAIT FOR GEMMA RESULT
+  // ========================================
+
+  unsigned long waitStart = millis();
+
+  while (millis() - waitStart < 30000) {
+
+    if (Serial.available()) {
+
+      String command = Serial.readStringUntil('\n');
+
+      command.trim();
+
+
+      // --------------------------------------
+      // Expect:
+      // LEVEL:1
+      // LEVEL:2
+      // ...
+      // LEVEL:5
+      // --------------------------------------
+
+      if (command.startsWith("LEVEL:")) {
+
+        int newLevel =
+          command.substring(6).toInt();
+
+        if (newLevel >= 1 && newLevel <= 5) {
+
+          partyLevel = newLevel;
+
+          Serial.print("AI_LEVEL:");
+          Serial.println(partyLevel);
+
+          Serial.println("NEW_PARTY_LEVEL");
+
+          // Immediately show new level
+          for (int i = 0; i < 10; i++) {
+            updateLEDs();
+            delay(30);
+          }
+
+          break;
+        }
+      }
     }
-    else if (isDark) {
-      Serial.println("NIGHT LAMP");
-    }
-    else {
-      Serial.println("DAY FRESH");
-    }
+
+    updateLEDs();
+    delay(20);
   }
 }
 
 
 // ============================================
-// 🌙 NIGHT LAMP MODE
+// LED CONTROLLER
 // ============================================
 
-void lampMode() {
-
-  static unsigned long lastUpdate = 0;
-
-  if (millis() - lastUpdate < 80)
-    return;
-
-  lastUpdate = millis();
-
-
-  for (int i = 0; i < NUM_LEDS; i++) {
-
-    // Random flame-like brightness
-    int brightness = random(70, 160);
-
-    leds[i] = CRGB(
-      brightness,
-      brightness * 0.40,
-      brightness * 0.08
-    );
-  }
-
-  FastLED.show();
-}
-
-
-// ============================================
-// ☀️ DAY / FRESHNESS MODE
-// ============================================
-
-void freshnessMode() {
-
-  static uint8_t hue = 25;
-
-  static unsigned long lastUpdate = 0;
-
-  if (millis() - lastUpdate < 40)
-    return;
-
-  lastUpdate = millis();
-
-  hue++;
-
-
-  for (int i = 0; i < NUM_LEDS; i++) {
-
-    // Smooth breathing effect
-    uint8_t brightness =
-      beatsin8(
-        8,
-        70,
-        180,
-        0,
-        i * 5
-      );
-
-    leds[i] = CHSV(
-      hue,
-      120,
-      brightness
-    );
-  }
-
-  FastLED.show();
-}
-
-
-// ============================================
-// 🎉 DANCE MODE
-// ============================================
-
-void danceMode(int soundLevel) {
+void updateLEDs() {
 
   static uint8_t hue = 0;
 
-  static unsigned long lastUpdate = 0;
+  hue += 2;
 
 
-  // Sound controls speed
+  // ========================================
+  // LEVEL 1 — CALM
+  // ========================================
 
-  int speed = map(
-    soundLevel,
-    1800,
-    4095,
-    40,
-    5
-  );
+  if (partyLevel == 1) {
 
-  speed = constrain(speed, 5, 40);
+    for (int i = 0; i < NUM_LEDS; i++) {
 
+      uint8_t brightness =
+        beatsin8(
+          5,
+          20,
+          60,
+          0,
+          i * 2
+        );
 
-  if (millis() - lastUpdate < speed)
-    return;
-
-  lastUpdate = millis();
-
-
-  hue += 5;
-
-
-  for (int i = 0; i < NUM_LEDS; i++) {
-
-    uint8_t brightness =
-      beatsin8(
-        20,
-        100,
-        255,
-        0,
-        i * 10
+      leds[i] = CRGB(
+        brightness,
+        brightness * 0.45,
+        brightness * 0.08
       );
-
-    leds[i] = CHSV(
-      hue + i * 8,
-      255,
-      brightness
-    );
+    }
   }
+
+
+  // ========================================
+  // LEVEL 2 — CHILL
+  // ========================================
+
+  else if (partyLevel == 2) {
+
+    for (int i = 0; i < NUM_LEDS; i++) {
+
+      uint8_t brightness =
+        beatsin8(
+          8,
+          40,
+          100,
+          0,
+          i * 3
+        );
+
+      leds[i] = CHSV(
+        150,
+        180,
+        brightness
+      );
+    }
+  }
+
+
+  // ========================================
+  // LEVEL 3 — LIVELY
+  // ========================================
+
+  else if (partyLevel == 3) {
+
+    for (int i = 0; i < NUM_LEDS; i++) {
+
+      uint8_t brightness =
+        beatsin8(
+          12,
+          60,
+          170,
+          0,
+          i * 5
+        );
+
+      leds[i] = CHSV(
+        hue + i * 3,
+        220,
+        brightness
+      );
+    }
+  }
+
+
+  // ========================================
+  // LEVEL 4 — PARTY
+  // ========================================
+
+  else if (partyLevel == 4) {
+
+    for (int i = 0; i < NUM_LEDS; i++) {
+
+      uint8_t brightness =
+        beatsin8(
+          20,
+          100,
+          255,
+          0,
+          i * 8
+        );
+
+      leds[i] = CHSV(
+        hue + i * 8,
+        255,
+        brightness
+      );
+    }
+  }
+
+
+  // ========================================
+  // LEVEL 5 — ABSOLUTE CHAOS
+  // ========================================
+
+  else if (partyLevel == 5) {
+
+    for (int i = 0; i < NUM_LEDS; i++) {
+
+      leds[i] = CHSV(
+        hue + random8(100),
+        255,
+        random8(150, 255)
+      );
+    }
+  }
+
 
   FastLED.show();
 }
